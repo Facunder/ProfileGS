@@ -71,6 +71,7 @@ __global__ void duplicateWithKeys(
 	int P,
 	const float2* points_xy,
 	const float* depths,
+	const float2* obb_corners,
 	const uint32_t* offsets,
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
@@ -95,16 +96,31 @@ __global__ void duplicateWithKeys(
 		// and the value is the ID of the Gaussian. Sorting the values 
 		// with this key yields Gaussian IDs in a list, such that they
 		// are first sorted by tile and then by depth. 
+		float2 global_corners[4] = {
+			{obb_corners[idx * 4].x,     obb_corners[idx * 4].y},
+			{obb_corners[idx * 4 + 1].x, obb_corners[idx * 4 + 1].y},
+			{obb_corners[idx * 4 + 2].x, obb_corners[idx * 4 + 2].y},
+			{obb_corners[idx * 4 + 3].x, obb_corners[idx * 4 + 3].y}
+		};
+
 		for (int y = rect_min.y; y < rect_max.y; y++)
 		{
 			for (int x = rect_min.x; x < rect_max.x; x++)
 			{
-				uint64_t key = y * grid.x + x;
-				key <<= 32;
-				key |= *((uint32_t*)&depths[idx]);
-				gaussian_keys_unsorted[off] = key;
-				gaussian_values_unsorted[off] = idx;
-				off++;
+				float2 tile_corners[4] = {
+					{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y + BLOCK_Y - 1},
+					{x * BLOCK_X, y * BLOCK_Y + BLOCK_Y - 1},
+					{x * BLOCK_X, y * BLOCK_Y},
+					{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y}				
+				};
+				if(SAT(tile_corners, global_corners)){
+					uint64_t key = y * grid.x + x;
+					key <<= 32;
+					key |= *((uint32_t*)&depths[idx]);
+					gaussian_keys_unsorted[off] = key;
+					gaussian_values_unsorted[off] = idx;
+					off++;
+				}
 			}
 		}
 	}
@@ -160,6 +176,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
+	obtain(chunk, geom.obb_corners, P * 4, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
@@ -267,6 +284,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.means2D,
 		geomState.depths,
 		geomState.cov3D,
+		geomState.obb_corners,
 		geomState.rgb,
 		geomState.conic_opacity,
 		tile_grid,
@@ -293,6 +311,7 @@ int CudaRasterizer::Rasterizer::forward(
 		P,
 		geomState.means2D,
 		geomState.depths,
+		geomState.obb_corners,
 		geomState.point_offsets,
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,

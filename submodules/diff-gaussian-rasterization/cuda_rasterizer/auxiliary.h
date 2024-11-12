@@ -42,6 +42,84 @@ __forceinline__ __device__ float ndc2Pix(float v, int S)
 	return ((v + 1.0) * S - 1.0) * 0.5;
 }
 
+__forceinline__ __device__ float2 vecSubtract(const float2 &a, const float2 &b)
+{
+    return make_float2(a.x - b.x, a.y - b.y);
+}
+
+
+__forceinline__ __device__ float vecDot(const float2 &a, const float2 &b)
+{
+    return a.x * b.x + a.y * b.y;
+}
+
+__forceinline__ __device__ float vecLength(const float2 &v)
+{
+    return sqrtf(v.x * v.x + v.y * v.y);
+}
+
+__forceinline__ __device__ float2 vecNormalize(const float2 &v)
+{
+    float len = vecLength(v);
+    if (len > 0)
+        return make_float2(v.x / len, v.y / len);
+    else
+        return make_float2(0.0f, 0.0f);
+}
+
+__forceinline__ __device__ float2 vecPerpendicular(const float2 &v)
+{
+    return make_float2(-v.y, v.x);
+}
+__forceinline__ __device__ bool SAT(float2 *rect1, float2 *rect2)
+{
+	float2 axes[4];
+
+    float2 edge1_0 = vecSubtract(rect1[1], rect1[0]);
+    float2 edge1_1 = vecSubtract(rect1[2], rect1[1]);
+
+    axes[0] = vecNormalize(vecPerpendicular(edge1_0));
+    axes[1] = vecNormalize(vecPerpendicular(edge1_1));
+
+    float2 edge2_0 = vecSubtract(rect2[1], rect2[0]);
+    float2 edge2_1 = vecSubtract(rect2[2], rect2[1]);
+
+    axes[2] = vecNormalize(vecPerpendicular(edge2_0));
+    axes[3] = vecNormalize(vecPerpendicular(edge2_1));
+
+    for (int i = 0; i < 4; i++)
+    {
+        float2 axis = axes[i];
+
+        float min1 = vecDot(rect1[0], axis);
+        float max1 = min1;
+        for (int j = 1; j < 4; j++)
+        {
+            float projection = vecDot(rect1[j], axis);
+            if (projection < min1)
+                min1 = projection;
+            else if (projection > max1)
+                max1 = projection;
+        }
+        float min2 = vecDot(rect2[0], axis);
+        float max2 = min2;
+        for (int j = 1; j < 4; j++)
+        {
+            float projection = vecDot(rect2[j], axis);
+            if (projection < min2)
+                min2 = projection;
+            else if (projection > max2)
+                max2 = projection;
+        }
+
+        if (max1 < min2 || max2 < min1)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid)
 {
 	rect_min = {

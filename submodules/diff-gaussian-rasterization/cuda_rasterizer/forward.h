@@ -41,6 +41,7 @@ namespace FORWARD
 		float2* points_xy_image,
 		float* depths,
 		float* cov3Ds,
+		float2* obb_corners,
 		float* colors,
 		float4* conic_opacity,
 		const dim3 grid,

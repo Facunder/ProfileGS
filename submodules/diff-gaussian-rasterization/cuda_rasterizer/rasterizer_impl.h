@@ -35,6 +35,7 @@ namespace CudaRasterizer
 		int* internal_radii;
 		float2* means2D;
 		float* cov3D;
+		float2* obb_corners;
 		float4* conic_opacity;
 		float* rgb;
 		uint32_t* point_offsets;

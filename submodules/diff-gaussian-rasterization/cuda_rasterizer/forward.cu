@@ -169,6 +169,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float2* points_xy_image,
 	float* depths,
 	float* cov3Ds,
+	float2* obb_corners,
 	float* rgb,
 	float4* conic_opacity,
 	const dim3 grid,
@@ -230,18 +231,55 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
 
+
 	// Compute extent in screen space (by finding eigenvalues of
 	// 2D covariance matrix). Use extent to compute a bounding rectangle
 	// of screen-space tiles that this Gaussian overlaps with. Quit if
 	// rectangle covers 0 tiles. 
 	float mid = 0.5f * (cov.x + cov.z);
+	float theta = 0.5f * atan2(2.f * cov.y, cov.x - cov.z);
+	float cos_theta = cos(theta);
+	float sin_theta = sin(theta);
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
-	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	// float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	float main_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	float sub_radius = ceil(3.f * sqrt(min(lambda1, lambda2)));
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	uint2 rect_min, rect_max;
-	getRect(point_image, my_radius, rect_min, rect_max, grid);
+	getRect(point_image, main_radius, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
+		return;
+	float2 local_corners[4] = {
+		{cov.x, cov.z},
+		{-cov.x, cov.z},
+		{-cov.x, -cov.z},
+		{cov.x, -cov.z}	
+	};
+	float2 global_corners[4];
+	for (int i = 0; i < 4; i++) {
+		float x_local = local_corners[i].x;
+		float y_local = local_corners[i].y;
+		float x_global = x_local * cos_theta - y_local * sin_theta + point_image.x;
+    	float y_global = x_local * sin_theta + y_local * cos_theta + point_image.y;
+    	global_corners[i] = make_float2(x_global, y_global);
+	}
+
+	// OBB
+	int touched_tile_count = 0;
+	for (int y = rect_min.y; y < rect_max.y; y++) {
+		for (int x = rect_min.x; x < rect_max.x; x++) {
+			float2 tile_corners[4] = {
+				{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y + BLOCK_Y - 1},
+				{x * BLOCK_X, y * BLOCK_Y + BLOCK_Y - 1},
+				{x * BLOCK_X, y * BLOCK_Y},
+				{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y}				
+			};
+			if(SAT(tile_corners, global_corners))
+				touched_tile_count++;
+		}
+	}
+	if(touched_tile_count == 0)
 		return;
 
 	// If colors have been precomputed, use them, otherwise convert
@@ -256,16 +294,21 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
-	radii[idx] = my_radius;
+	radii[idx] = main_radius;
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	float opacity = opacities[idx];
-
-
+	
 	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacity * h_convolution_scaling };
+	
+	obb_corners[idx * 4] = {global_corners[0].x, global_corners[0].y};
+	obb_corners[idx * 4 + 1] = {global_corners[1].x, global_corners[1].y};
+	obb_corners[idx * 4 + 2] = {global_corners[2].x, global_corners[2].y};
+	obb_corners[idx * 4 + 3] = {global_corners[3].x, global_corners[3].y};				
 
+	// tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+	tiles_touched[idx] = touched_tile_count;
 
-	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -446,6 +489,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	float2* means2D,
 	float* depths,
 	float* cov3Ds,
+	float2* obb_corners,
 	float* rgb,
 	float4* conic_opacity,
 	const dim3 grid,
@@ -474,6 +518,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		means2D,
 		depths,
 		cov3Ds,
+		obb_corners,
 		rgb,
 		conic_opacity,
 		grid,
