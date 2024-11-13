@@ -14,8 +14,11 @@ import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
+from utils.system_utils import mkdir_p
 import sys
 from scene import Scene, GaussianModel
+from utils.general_utils import safe_state
+from datetime import datetime
 from utils.general_utils import safe_state, get_expon_lr_func
 import uuid
 from tqdm import tqdm
@@ -109,8 +112,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg, use_trained_exp=dataset.train_test_exp, separate_sh=SPARSE_ADAM_AVAILABLE)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-
+        # image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+        # for WLZ-util.py
+        image, viewspace_point_tensor, buffer = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["buffer"]
+        radii = buffer["radii"]
+        visibility_filter = radii > 0
+        
         if viewpoint_cam.alpha_mask is not None:
             alpha_mask = viewpoint_cam.alpha_mask.cuda()
             image *= alpha_mask
@@ -159,6 +166,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
+                # WLZ add for saving simulator raw input i.e. buffer data
+                sim_input_path = os.path.join(args.model_path, "sim_pts/iteration_{}".format(iteration), "raw_data.pt")
+                mkdir_p(os.path.dirname(sim_input_path))
+                torch.save(buffer, sim_input_path)
 
             # Densification
             if iteration < opt.densify_until_iter:
@@ -189,13 +200,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-def prepare_output_and_logger(args):    
+def prepare_output_and_logger(args):   
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S") 
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
         else:
             unique_str = str(uuid.uuid4())
-        args.model_path = os.path.join("./output/", unique_str[0:10])
+            
+        # args.model_path = os.path.join("./output/", unique_str[0:10])
+        args.model_path = os.path.join("./output/", f"{current_time}_{unique_str[0:10]}") 
         
     # Set up output folder
     print("Output folder: {}".format(args.model_path))
@@ -262,7 +276,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument('--disable_viewer', action='store_true', default=False)
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
