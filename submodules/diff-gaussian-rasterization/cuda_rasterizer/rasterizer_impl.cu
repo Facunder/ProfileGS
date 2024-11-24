@@ -69,6 +69,7 @@ __global__ void checkFrustum(int P,
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
 	int P,
+	const int* pattern_type,
 	const float2* points_xy,
 	const float* depths,
 	const uint32_t* offsets,
@@ -86,27 +87,35 @@ __global__ void duplicateWithKeys(
 	{
 		// Find this Gaussian's offset in buffer for writing keys/values.
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
-		uint2 rect_min, rect_max;
+		if(pattern_type[idx] == -1) {	
+			uint2 rect_min, rect_max;
 
-		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
+			getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
 
-		// For each tile that the bounding rect overlaps, emit a 
-		// key/value pair. The key is |  tile ID  |      depth      |,
-		// and the value is the ID of the Gaussian. Sorting the values 
-		// with this key yields Gaussian IDs in a list, such that they
-		// are first sorted by tile and then by depth. 
-		for (int y = rect_min.y; y < rect_max.y; y++)
-		{
-			for (int x = rect_min.x; x < rect_max.x; x++)
+			// For each tile that the bounding rect overlaps, emit a 
+			// key/value pair. The key is |  tile ID  |      depth      |,
+			// and the value is the ID of the Gaussian. Sorting the values 
+			// with this key yields Gaussian IDs in a list, such that they
+			// are first sorted by tile and then by depth. 
+			for (int y = rect_min.y; y < rect_max.y; y++)
 			{
-				uint64_t key = y * grid.x + x;
-				key <<= 32;
-				key |= *((uint32_t*)&depths[idx]);
-				gaussian_keys_unsorted[off] = key;
-				gaussian_values_unsorted[off] = idx;
-				off++;
+				for (int x = rect_min.x; x < rect_max.x; x++)
+				{
+					uint64_t key = y * grid.x + x;
+					key <<= 32;
+					key |= *((uint32_t*)&depths[idx]);
+					gaussian_keys_unsorted[off] = key;
+					gaussian_values_unsorted[off] = idx;
+					off++;
+				}
 			}
+		} else{
+			int tile_x = (int)((int)(points_xy[idx].x) / BLOCK_X);
+			int tile_y = (int)((int)(points_xy[idx].y) / BLOCK_Y);
+			int* patternIdx;
+			tileTouchPattern((int)(idx), tile_x, tile_y, pattern_type[idx], gaussian_keys_unsorted, gaussian_values_unsorted, off, depths[idx], grid);
 		}
+		
 	}
 }
 
@@ -157,6 +166,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	GeometryState geom;
 	obtain(chunk, geom.depths, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
+	obtain(chunk, geom.pattern_type, P, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
@@ -265,6 +275,7 @@ int CudaRasterizer::Rasterizer::forward(
 		tan_fovx, tan_fovy,
 		radii,
 		geomState.means2D,
+		geomState.pattern_type,
 		geomState.depths,
 		geomState.cov3D,
 		geomState.rgb,
@@ -291,6 +302,7 @@ int CudaRasterizer::Rasterizer::forward(
 	// and corresponding dublicated Gaussian indices to be sorted
 	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
 		P,
+		geomState.pattern_type,
 		geomState.means2D,
 		geomState.depths,
 		geomState.point_offsets,

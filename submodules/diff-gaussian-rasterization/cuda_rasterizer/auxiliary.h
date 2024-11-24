@@ -36,12 +36,108 @@ __device__ const float SH_C3[] = {
 	1.445305721320277f,
 	-0.5900435899266435f
 };
+__device__ const int TILE_OFFSETS_1to2RADII_1d4RATIO_POSI_AXIS0[] = {
+	-2, 1,
+	-1, 1,
+	0, 1,
+	1, 1,
+	2, 1,
+	-2, 0,
+	-1, 0,
+	0, 0,
+	1, 0,
+	2, 0,
+	-2, -1,
+	-1, -1,
+	-0, -1
+};
+// __device const int TILE_OFFSETS_1to2RADII_1d4RATIO_POSI_AXIS0[] = {
+// 	0, 2,
+// 	1, 2,
+// 	2, 2,
+// 	3, 2,//
+// 	-4, 1,
+// 	-3, 1,
+// 	-2, 1,
+// 	-1, 1,
+// 	0, 1,
+// 	1, 1, 
+// 	2, 1,
+// 	3, 1,
+// 	4, 1,
+
+// };
+// __device__ const int TILE_OFFSETS_POSI_AXIS_TYPE1[] = {
+// 		-2, 0,
+// 		-1, 0,
+// 		0, 0,
+// 		1, 0,
+// 		2, 0,
+// 		-2, -1,
+// 		-1, -1,
+// 		0, -1,
+// 		1, -1,
+// 		2, -1
+// };
+// __device__ const int TILE_OFFSETS_S55_TYPE2[] = {
+// 		-1, -2,
+// 		-0, -2,
+// 		1, -2, 
+// 		-1, -1,
+// 		0, -1,
+// 		1, -1,
+// 		-1, 0,
+// 		0, 0,
+// 		1, 0,
+// 		-1, 1,
+// 		0, 1,
+// 		1, 1,
+// 		-1, 2,
+// 		0, 2,
+// 		1, 2
+// };
 
 __forceinline__ __device__ float ndc2Pix(float v, int S)
 {
 	return ((v + 1.0) * S - 1.0) * 0.5;
 }
 
+
+__forceinline__ __device__ int patternClamp(const float2 p, const int type, dim3 grid)
+{
+	if(type == -1) {
+		return 0;
+	}
+	int tile_x = (int)(p.x / BLOCK_X);
+	int tile_y = (int)(p.y / BLOCK_Y);
+	int fine_tile_x = (int)(p.x / (BLOCK_X * 0.5));
+	int fine_tile_y = (int)(p.y / (BLOCK_Y * 0.5));
+	if(type == 0){
+		return tile_x > 1 && tile_x < grid.x - 2 && tile_y > 0 && tile_y < grid.y - 1 && (fine_tile_y & 1) && !(fine_tile_x & 1);
+	} else {
+		return 0;
+	}
+}
+
+__forceinline__ __device__ int getPatternTileNum(const int type){
+	if(type == 0){
+		return 13; // hardcoded length
+	} else {
+		return 0;
+	}
+}
+
+__forceinline__ __device__ void tileTouchPattern(int idx, const int tile_x, const int tile_y, const int type, uint64_t* gaussian_keys_unsorted, uint32_t* gaussian_values_unsorte, uint32_t off, float depth, dim3 grid){
+	if(type == 0){
+		for(int i = 0; i < 13; i++) {
+			uint64_t key = (tile_y + TILE_OFFSETS_1to2RADII_1d4RATIO_POSI_AXIS0[2 * i + 1]) * grid.x + (tile_x + TILE_OFFSETS_1to2RADII_1d4RATIO_POSI_AXIS0[2 * i]);
+			key <<= 32;
+			key |= *((uint32_t*)&depth);
+			gaussian_keys_unsorted[off + i] = key;
+			gaussian_values_unsorte[off + i] = idx;
+		}
+	}
+}
 __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid)
 {
 	rect_min = {

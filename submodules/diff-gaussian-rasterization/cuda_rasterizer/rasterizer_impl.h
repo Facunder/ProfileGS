@@ -32,6 +32,7 @@ namespace CudaRasterizer
 		float* depths;
 		char* scanning_space;
 		bool* clamped;
+		int* pattern_type;
 		int* internal_radii;
 		float2* means2D;
 		float* cov3D;

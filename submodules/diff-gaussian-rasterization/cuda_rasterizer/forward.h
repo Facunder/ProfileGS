@@ -39,6 +39,7 @@ namespace FORWARD
 		const float tan_fovx, float tan_fovy,
 		int* radii,
 		float2* points_xy_image,
+		int* pattern_type,
 		float* depths,
 		float* cov3Ds,
 		float* colors,

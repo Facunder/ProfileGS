@@ -167,6 +167,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float focal_x, float focal_y,
 	int* radii,
 	float2* points_xy_image,
+	int* pattern_type,
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
@@ -237,13 +238,31 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float mid = 0.5f * (cov.x + cov.z);
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+	float main_axis_slope = (lambda1 - cov.x) / cov.y;
 	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
-	uint2 rect_min, rect_max;
-	getRect(point_image, my_radius, rect_min, rect_max, grid);
-	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
-		return;
+	radii[idx] = my_radius; // convert FP 2 int
+	if (radii[idx] > BLOCK_X && radii[idx] < 2 * BLOCK_X) {
+		if (lambda1 > 4 * lambda2 || lambda2 > 4 * lambda1) { // min/max eigenvalue: narrow or not
+			if(main_axis_slope > 0 && main_axis_slope < 0.25) {// same sign and cmp <<2 (easy for hardware)
+				pattern_type[idx] = 0;		
+			} 
+		}
+	} else {	
+		pattern_type[idx] = -1;
+	}
 
+	if(patternClamp(point_image, pattern_type[idx], grid) == 0){
+		uint2 rect_min, rect_max;
+		getRect(point_image, my_radius, rect_min, rect_max, grid);
+		if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
+			return;
+		tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+		pattern_type[idx] = -1;
+	} else {
+		tiles_touched[idx] = getPatternTileNum(pattern_type[idx]);
+	}
+	
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
 	if (colors_precomp == nullptr)
@@ -256,7 +275,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
-	radii[idx] = my_radius;
+	
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	float opacity = opacities[idx];
@@ -265,7 +284,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacity * h_convolution_scaling };
 
 
-	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+	
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -444,6 +463,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float tan_fovx, float tan_fovy,
 	int* radii,
 	float2* means2D,
+	int* pattern_type,
 	float* depths,
 	float* cov3Ds,
 	float* rgb,
@@ -472,6 +492,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		focal_x, focal_y,
 		radii,
 		means2D,
+		pattern_type,
 		depths,
 		cov3Ds,
 		rgb,
