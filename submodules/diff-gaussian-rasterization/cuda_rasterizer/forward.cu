@@ -174,6 +174,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	uint32_t* sub_radii,
+	float* axis_ratio,
+	float* main_direction,
 	bool prefiltered,
 	bool antialiasing)
 {
@@ -185,6 +188,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// this Gaussian will not be processed further.
 	radii[idx] = 0;
 	tiles_touched[idx] = 0;
+	sub_radii[idx] = 0;
+	axis_ratio[idx] = 0;
+	main_direction[idx] = 0;
 
 	// Perform near culling, quit if outside.
 	float3 p_view;
@@ -246,6 +252,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float main_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 	float sub_radius = ceil(3.f * sqrt(min(lambda1, lambda2)));
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
+	float main_direct = (lambda1 - cov.x) / cov.y;
 	uint2 rect_min, rect_max;
 	getRect(point_image, main_radius, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
@@ -295,6 +302,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
 	radii[idx] = main_radius;
+	sub_radii[idx] = sub_radius;
+	axis_ratio[idx] = radii[idx] / sub_radii[idx];
+	main_direction[idx] = main_direct;
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	float opacity = opacities[idx];
@@ -494,6 +504,9 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	uint32_t* sub_radii,
+	float* axis_ratio,
+	float* main_direction,
 	bool prefiltered,
 	bool antialiasing)
 {
@@ -523,6 +536,9 @@ void FORWARD::preprocess(int P, int D, int M,
 		conic_opacity,
 		grid,
 		tiles_touched,
+		sub_radii,
+		axis_ratio,
+		main_direction,
 		prefiltered,
 		antialiasing
 		);

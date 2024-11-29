@@ -69,6 +69,7 @@ __global__ void checkFrustum(int P,
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
 	int P,
+	uint64_t* pattern_codes,
 	const float2* points_xy,
 	const float* depths,
 	const float2* obb_corners,
@@ -81,7 +82,7 @@ __global__ void duplicateWithKeys(
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
 		return;
-
+	pattern_codes[idx] = 0;
 	// Generate no key/value pair for invisible Gaussians
 	if (radii[idx] > 0)
 	{
@@ -90,7 +91,8 @@ __global__ void duplicateWithKeys(
 		uint2 rect_min, rect_max;
 
 		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
-
+		int tile_id_x = (int)((int)(points_xy[idx].x) / BLOCK_X);
+		int tile_id_y = (int)((int)(points_xy[idx].y) / BLOCK_Y);
 		// For each tile that the bounding rect overlaps, emit a 
 		// key/value pair. The key is |  tile ID  |      depth      |,
 		// and the value is the ID of the Gaussian. Sorting the values 
@@ -115,6 +117,10 @@ __global__ void duplicateWithKeys(
 				};
 				if(SAT(tile_corners, global_corners)){
 					uint64_t key = y * grid.x + x;
+					int offset_x = x - tile_id_x;
+					int offset_y = y - tile_id_y;
+					uint64_t tmpmask = getAdjacencyCode(offset_x, offset_y);
+					pattern_codes[idx] = pattern_codes[idx] | tmpmask;
 					key <<= 32;
 					key |= *((uint32_t*)&depths[idx]);
 					gaussian_keys_unsorted[off] = key;
@@ -180,6 +186,10 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
+	obtain(chunk, geom.adjacency_codes, P, 128);
+	obtain(chunk, geom.sub_radii, P, 128);
+	obtain(chunk, geom.axis_ratio, P, 128);
+	obtain(chunk, geom.main_direction, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);
 	obtain(chunk, geom.point_offsets, P, 128);
@@ -289,6 +299,9 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
+		geomState.sub_radii,
+		geomState.axis_ratio,
+		geomState.main_direction,
 		prefiltered,
 		antialiasing
 	), debug)
@@ -309,6 +322,7 @@ int CudaRasterizer::Rasterizer::forward(
 	// and corresponding dublicated Gaussian indices to be sorted
 	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
 		P,
+		geomState.adjacency_codes,
 		geomState.means2D,
 		geomState.depths,
 		geomState.obb_corners,

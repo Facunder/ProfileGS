@@ -40,6 +40,10 @@ namespace CudaRasterizer
 		float* rgb;
 		uint32_t* point_offsets;
 		uint32_t* tiles_touched;
+		uint64_t* adjacency_codes;
+		uint32_t* sub_radii;
+		float* axis_ratio;
+		float* main_direction;
 
 		static GeometryState fromChunk(char*& chunk, size_t P);
 	};

@@ -7,4 +7,7 @@ diff_rasterization/dist
 tensorboard_3d
 screenshots
 sim_pts/
-tmp*.log
+sim_*/
+*.log
+*.txt
+*.npy
