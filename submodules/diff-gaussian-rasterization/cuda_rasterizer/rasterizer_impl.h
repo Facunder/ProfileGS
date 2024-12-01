@@ -32,6 +32,7 @@ namespace CudaRasterizer
 		float* depths;
 		char* scanning_space;
 		bool* clamped;
+		bool* patterned;
 		int* internal_radii;
 		float2* means2D;
 		float* cov3D;
@@ -39,6 +40,7 @@ namespace CudaRasterizer
 		float* rgb;
 		uint32_t* point_offsets;
 		uint32_t* tiles_touched;
+		uint32_t* geom_feature;
 
 		static GeometryState fromChunk(char*& chunk, size_t P);
 	};

@@ -14,6 +14,8 @@
 
 #include "config.h"
 #include "stdio.h"
+#include <iostream>
+#include "pattern_pair_array.h"
 
 #define BLOCK_SIZE (BLOCK_X * BLOCK_Y)
 #define NUM_WARPS (BLOCK_SIZE/32)
@@ -36,7 +38,134 @@ __device__ const float SH_C3[] = {
 	1.445305721320277f,
 	-0.5900435899266435f
 };
+__device__ const float angle_criteria[] = {
+	-5.0273f,
+    -2.4142f,
+    -1.4966f,   
+	-1.0000f,   
+	-0.6682f,   
+	-0.4142f,   
+	-0.1989f,         
+	0.0f,    
+	0.1989f,
+	0.4142f,
+    0.6682f,
+    1.0000f,
+    1.4966f,
+	2.4142f,
+    5.0273f
+};
+struct offsetsAdjacencyPair{
+	int offset_x;
+	int offset_y;
+	uint64_t one_hot_adjacency; 
+};
+// uint64_t unit_num = 1;
+__device__ const offsetsAdjacencyPair offsetsAdjacencyPairs[] = {
+	{-1,  0, 0x0000000000000001},
+	{ 0,  1, 0x0000000000000002},
+	{ 1,  0, 0x0000000000000004},
+	{ 0, -1, 0x0000000000000008}, // level-1 over 4
+	{-2,  0, 0x0000000000000010},
+	{-1,  1, 0x0000000000000020},
+	{ 0,  2, 0x0000000000000040},
+	{ 1,  1, 0x0000000000000080},
+	{ 2,  0, 0x0000000000000100},
+	{ 1, -1, 0x0000000000000200},
+	{ 0, -2, 0x0000000000000400},
+	{-1, -1, 0x0000000000000800}, // level-2 over 8
+	{-3,  0, 0x0000000000001000},
+	{-2,  1, 0x0000000000002000},
+	{-1,  2, 0x0000000000004000},
+	{ 0,  3, 0x0000000000008000},
+	{ 1,  2, 0x0000000000010000},
+	{ 2,  1, 0x0000000000020000},
+	{ 3,  0, 0x0000000000040000},
+	{ 2, -1, 0x0000000000080000},
+	{ 1, -2, 0x0000000000100000},
+	{ 0, -3, 0x0000000000200000},
+	{-1, -2, 0x0000000000400000},
+	{-2, -1, 0x0000000000800000}, // level-3 over 12
+	{-4,  0, 0x0000000001000000},
+	{-3,  1, 0x0000000002000000},
+	{-2,  2, 0x0000000004000000},
+	{-1,  3, 0x0000000008000000},
+	{ 0,  4, 0x0000000010000000},
+	{ 1,  3, 0x0000000020000000},
+	{ 2,  2, 0x0000000040000000},
+	{ 3,  1, 0x0000000080000000},
+	{ 4,  0, 0x0000000100000000},
+	{ 3, -1, 0x0000000200000000},
+	{ 2, -2, 0x0000000400000000},
+	{ 1, -3, 0x0000000800000000},
+	{ 0, -4, 0x0000001000000000},
+	{-1, -3, 0x0000002000000000},
+	{-2, -2, 0x0000004000000000},
+	{-3, -1, 0x0000008000000000}, // level-4 over 16
+	{-5,  0, 0x0000010000000000},
+	{-4,  1, 0x0000020000000000},
+	{-3,  2, 0x0000040000000000},
+	{-2,  3, 0x0000080000000000},
+	{-1,  4, 0x0000100000000000},
+	{ 0,  5, 0x0000200000000000},
+	{ 1,  4, 0x0000400000000000},
+	{ 2,  3, 0x0000800000000000},
+	{ 3,  2, 0x0001000000000000},
+	{ 4,  1, 0x0002000000000000},
+	{ 5,  0, 0x0004000000000000},
+	{ 4, -1, 0x0008000000000000},
+	{ 3, -2, 0x0010000000000000},
+	{ 2, -3, 0x0020000000000000},
+	{ 1, -4, 0x0040000000000000},
+	{ 0, -5, 0x0080000000000000}, 
+	{-1, -4, 0x0100000000000000},
+	{-2, -3, 0x0200000000000000},
+	{-3, -2, 0x0400000000000000},
+	{-4, -1, 0x0800000000000000}, // level-5 over 20
+};
 
+__forceinline__ __device__ void getAngleFeature(uint32_t& feature, float tan_main_direction)
+{
+	for(int i = 0; i < 15; i++) {
+		if(tan_main_direction < angle_criteria[i]) {
+			feature |= (i << 6); // radii 4bits and sub_location 2bits
+			return;
+		}
+	}
+	feature |= (15 << 6);
+}
+__forceinline__ __device__ int popcount_uint64_t(uint64_t n) {
+    unsigned int low = __popc(static_cast<unsigned int>(n)); 
+	// printf("low: %d\n", low);
+    unsigned int high = __popc(static_cast<unsigned int>(n >> 32)); 
+	// printf("high: %d\n", high);
+    return low + high;
+}
+__forceinline__ __device__ bool patternDecoder(uint64_t pattern, int indix, int& offset_x, int& offset_y) {
+	if(pattern & offsetsAdjacencyPairs[indix].one_hot_adjacency){
+		offset_x = offsetsAdjacencyPairs[indix].offset_x;
+		offset_y = offsetsAdjacencyPairs[indix].offset_y;
+		return true;
+	} else 
+		return false;
+}
+__forceinline__ __device__ int patternMatchNum(uint32_t feature, bool& patterned) {
+	for(int i = 0; i < 69606; i++){ // pattern length hardcoded
+		if(feature == pattern_pairs[i].key){
+			patterned = true;
+			return popcount_uint64_t(pattern_pairs[i].value);
+		}
+	}
+	patterned = false;
+	return 0;
+}
+__forceinline__ __device__ uint64_t patternMatch(uint32_t feature) {
+	for(int i = 0; i < 69606; i++){ // pattern length hardcoded
+		if(feature == pattern_pairs[i].key){
+			return pattern_pairs[i].value;
+		}
+	}
+}
 __forceinline__ __device__ float ndc2Pix(float v, int S)
 {
 	return ((v + 1.0) * S - 1.0) * 0.5;

@@ -12,6 +12,7 @@
 #include "forward.h"
 #include "auxiliary.h"
 #include <cooperative_groups.h>
+#include <cassert>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 
@@ -173,6 +174,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	uint32_t* geom_feature,
+	bool* patterned,
 	bool prefiltered,
 	bool antialiasing)
 {
@@ -184,6 +187,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// this Gaussian will not be processed further.
 	radii[idx] = 0;
 	tiles_touched[idx] = 0;
+	geom_feature[idx] = 0;
+	patterned[idx] = false;
 
 	// Perform near culling, quit if outside.
 	float3 p_view;
@@ -238,11 +243,72 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
 	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	float sub_radius = ceil(3.f * sqrt(min(lambda1, lambda2)));
+	int axis_ratio = my_radius / sub_radius;
+	if (axis_ratio < 1) {
+		axis_ratio = 0;
+	} else if(axis_ratio >= 16) {
+		axis_ratio = 15;
+	} else {
+		axis_ratio = axis_ratio - 1;
+	}
+	geom_feature[idx] |= (axis_ratio << 10);
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
+	float main_direct = (lambda1 - cov.x) / cov.y;
+	int sub_tile_x = point_image.x / (0.5 * BLOCK_X);
+	int sub_tile_y = point_image.y / (0.5 * BLOCK_Y);
+	int tile_x = point_image.x / BLOCK_X;
+	int tile_y = point_image.y / BLOCK_Y;
+	if (sub_tile_x & 1 != 0) {
+		geom_feature[idx] |= 1;
+	}
+	if (sub_tile_y & 1 == 0) {
+		geom_feature[idx] |= 2;
+	}
+	getAngleFeature(geom_feature[idx], main_direct);
+	int tmp_radii = my_radius / 4;
+	if (tmp_radii < 1) {
+		tmp_radii  = 0;
+	} else if(tmp_radii >= 16) {
+		tmp_radii  = 15;
+	} else {
+		tmp_radii  = tmp_radii - 1;
+	}
+	geom_feature[idx] |= (tmp_radii << 2);
+	int tmp_tile_touch = patternMatchNum(geom_feature[idx], patterned[idx]);
+	if(!(my_radius < 65)) {
+		patterned[idx] = false;
+	}
 	uint2 rect_min, rect_max;
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
-	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
+	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0){
+		patterned[idx] = false;
 		return;
+	}
+	
+	if(patterned[idx]){
+		int check_count = 0;
+		tiles_touched[idx] = tmp_tile_touch + 1;
+		uint64_t cur_pattern = patternMatch(geom_feature[idx]);
+		int tmp_offset_x = 0;
+		int tmp_offset_y = 0;
+		for (int i = 0; i < 59; i++) {
+			if(patternDecoder(cur_pattern, i, tmp_offset_x, tmp_offset_y)){
+				int tmp_x = tile_x + tmp_offset_x;
+				int tmp_y = tile_y + tmp_offset_y;
+				check_count++;
+				if(tmp_x < 0 || tmp_x > grid.x || tmp_y < 0 || tmp_y > grid.y) {
+					tiles_touched[idx]--;
+				}	
+			}
+		}
+		// printf("check_count: %d\n, tmp_tile_touch %d\n", check_count, tmp_tile_touch);
+		// assert(tmp_tile_touch == check_count);
+	} else {
+		tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+	}
+
+	
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
@@ -261,11 +327,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	float opacity = opacities[idx];
 
-
 	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacity * h_convolution_scaling };
 
-
-	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -450,6 +513,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
+	uint32_t* geom_feature,
+	bool* patterned,
 	bool prefiltered,
 	bool antialiasing)
 {
@@ -478,6 +543,8 @@ void FORWARD::preprocess(int P, int D, int M,
 		conic_opacity,
 		grid,
 		tiles_touched,
+		geom_feature,
+		patterned,
 		prefiltered,
 		antialiasing
 		);

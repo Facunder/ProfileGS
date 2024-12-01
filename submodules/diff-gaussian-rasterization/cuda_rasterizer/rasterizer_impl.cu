@@ -72,6 +72,8 @@ __global__ void duplicateWithKeys(
 	const float2* points_xy,
 	const float* depths,
 	const uint32_t* offsets,
+	bool* patterned,
+	uint32_t* geom_feature,
 	uint64_t* gaussian_keys_unsorted,
 	uint32_t* gaussian_values_unsorted,
 	int* radii,
@@ -86,27 +88,57 @@ __global__ void duplicateWithKeys(
 	{
 		// Find this Gaussian's offset in buffer for writing keys/values.
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
-		uint2 rect_min, rect_max;
+		int tile_x = points_xy[idx].x / BLOCK_X;
+		int tile_y = points_xy[idx].y / BLOCK_Y;
+		if(patterned[idx]) {
+			uint64_t key = tile_y * grid.x + tile_x;
+			key <<= 32;
+			key |= *((uint32_t*)&depths[idx]);
+			gaussian_keys_unsorted[off] = key;
+			gaussian_values_unsorted[off] = idx;
+			off++;
+			uint64_t cur_pattern = patternMatch(geom_feature[idx]);
+			int tmp_offset_x = 0;
+			int tmp_offset_y = 0;
+			for (int i = 0; i < 59; i++) {
+				if(patternDecoder(cur_pattern, i, tmp_offset_x, tmp_offset_y)){
+					int tmp_x = tile_x + tmp_offset_x;
+					int tmp_y = tile_y + tmp_offset_y;
+					if(tmp_x >= 0 && tmp_x <= grid.x && tmp_y >= 0 && tmp_y <= grid.y) {
+						key = tmp_y * grid.x + tmp_x;
+						key <<= 32;
+						key |= *((uint32_t*)&depths[idx]);
+						gaussian_keys_unsorted[off] = key;
+						gaussian_values_unsorted[off] = idx;
+						off++;
+					} else {
+						continue;
+					}	
+				}
+			}
+		} else {
+			uint2 rect_min, rect_max;
+			getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
 
-		getRect(points_xy[idx], radii[idx], rect_min, rect_max, grid);
-
-		// For each tile that the bounding rect overlaps, emit a 
-		// key/value pair. The key is |  tile ID  |      depth      |,
-		// and the value is the ID of the Gaussian. Sorting the values 
-		// with this key yields Gaussian IDs in a list, such that they
-		// are first sorted by tile and then by depth. 
-		for (int y = rect_min.y; y < rect_max.y; y++)
-		{
-			for (int x = rect_min.x; x < rect_max.x; x++)
+			// For each tile that the bounding rect overlaps, emit a 
+			// key/value pair. The key is |  tile ID  |      depth      |,
+			// and the value is the ID of the Gaussian. Sorting the values 
+			// with this key yields Gaussian IDs in a list, such that they
+			// are first sorted by tile and then by depth. 
+			for (int y = rect_min.y; y < rect_max.y; y++)
 			{
-				uint64_t key = y * grid.x + x;
-				key <<= 32;
-				key |= *((uint32_t*)&depths[idx]);
-				gaussian_keys_unsorted[off] = key;
-				gaussian_values_unsorted[off] = idx;
-				off++;
+				for (int x = rect_min.x; x < rect_max.x; x++)
+				{
+					uint64_t key = y * grid.x + x;
+					key <<= 32;
+					key |= *((uint32_t*)&depths[idx]);
+					gaussian_keys_unsorted[off] = key;
+					gaussian_values_unsorted[off] = idx;
+					off++;
+				}
 			}
 		}
+		
 	}
 }
 
@@ -157,12 +189,14 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	GeometryState geom;
 	obtain(chunk, geom.depths, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
+	obtain(chunk, geom.patterned, P, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
+	obtain(chunk, geom.geom_feature, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);
 	obtain(chunk, geom.point_offsets, P, 128);
@@ -271,6 +305,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.conic_opacity,
 		tile_grid,
 		geomState.tiles_touched,
+		geomState.geom_feature,
+		geomState.patterned,
 		prefiltered,
 		antialiasing
 	), debug)
@@ -294,6 +330,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.means2D,
 		geomState.depths,
 		geomState.point_offsets,
+		geomState.patterned,
+		geomState.geom_feature,
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		radii,
