@@ -88,8 +88,8 @@ __global__ void duplicateWithKeys(
 	{
 		// Find this Gaussian's offset in buffer for writing keys/values.
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
-		int tile_x = points_xy[idx].x / BLOCK_X;
-		int tile_y = points_xy[idx].y / BLOCK_Y;
+		int tile_x = min(grid.x, max((int)0, (int)(points_xy[idx].x / BLOCK_X)));
+		int tile_y = min(grid.y, max((int)0, (int)(points_xy[idx].y / BLOCK_Y)));
 		if(patterned[idx]) {
 			uint64_t key = tile_y * grid.x + tile_x;
 			key <<= 32;
@@ -100,7 +100,7 @@ __global__ void duplicateWithKeys(
 			uint64_t cur_pattern = patternMatch(geom_feature[idx]);
 			int tmp_offset_x = 0;
 			int tmp_offset_y = 0;
-			for (int i = 0; i < 59; i++) {
+			for (int i = 0; i < 60; i++) {
 				if(patternDecoder(cur_pattern, i, tmp_offset_x, tmp_offset_y)){
 					int tmp_x = tile_x + tmp_offset_x;
 					int tmp_y = tile_y + tmp_offset_y;

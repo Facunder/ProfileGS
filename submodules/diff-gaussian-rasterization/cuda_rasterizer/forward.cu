@@ -257,8 +257,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float main_direct = (lambda1 - cov.x) / cov.y;
 	int sub_tile_x = point_image.x / (0.5 * BLOCK_X);
 	int sub_tile_y = point_image.y / (0.5 * BLOCK_Y);
-	int tile_x = point_image.x / BLOCK_X;
-	int tile_y = point_image.y / BLOCK_Y;
+	int tile_x = min(grid.x, max((int)0, (int)(point_image.x / BLOCK_X)));
+	int tile_y = min(grid.y, max((int)0, (int)(point_image.y / BLOCK_Y)));
 	if (sub_tile_x & 1 != 0) {
 		geom_feature[idx] |= 1;
 	}
@@ -287,19 +287,19 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 	
 	if(patterned[idx]){
-		int check_count = 0;
+		// int check_count = 0;
 		tiles_touched[idx] = tmp_tile_touch + 1;
 		uint64_t cur_pattern = patternMatch(geom_feature[idx]);
 		int tmp_offset_x = 0;
 		int tmp_offset_y = 0;
-		for (int i = 0; i < 59; i++) {
+		for (int i = 0; i < 60; i++) {
 			if(patternDecoder(cur_pattern, i, tmp_offset_x, tmp_offset_y)){
 				int tmp_x = tile_x + tmp_offset_x;
 				int tmp_y = tile_y + tmp_offset_y;
-				check_count++;
+				// check_count++;
 				if(tmp_x < 0 || tmp_x > grid.x || tmp_y < 0 || tmp_y > grid.y) {
-					tiles_touched[idx]--;
-				}	
+					tiles_touched[idx] = tiles_touched[idx] - 1;
+				}
 			}
 		}
 		// printf("check_count: %d\n, tmp_tile_touch %d\n", check_count, tmp_tile_touch);
