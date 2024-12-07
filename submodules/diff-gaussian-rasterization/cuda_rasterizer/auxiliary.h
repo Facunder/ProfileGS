@@ -15,7 +15,8 @@
 #include "config.h"
 #include "stdio.h"
 #include <iostream>
-#include "pattern_pair_array.h"
+// #include "pattern_pair_array.h"
+#include "opacity_pattern_pair_array.h"
 
 #define BLOCK_SIZE (BLOCK_X * BLOCK_Y)
 #define NUM_WARPS (BLOCK_SIZE/32)
@@ -149,23 +150,42 @@ __forceinline__ __device__ bool patternDecoder(uint64_t pattern, int indix, int&
 	} else 
 		return false;
 }
-__forceinline__ __device__ int patternMatchNum(uint32_t feature, bool& patterned) {
-	for(int i = 0; i < 69606; i++){ // pattern length hardcoded
-		if(feature == pattern_pairs[i].key){
-			patterned = true;
-			return popcount_uint64_t(pattern_pairs[i].value);
-		}
-	}
-	patterned = false;
-	return 0;
-}
+// __forceinline__ __device__ int patternMatchNum(uint32_t feature, bool& patterned) {
+// 	for(int i = 0; i < 220578; i++){ // pattern length hardcoded
+// 		if(feature == pattern_pairs[i].key){
+// 			patterned = true;
+// 			return popcount_uint64_t(pattern_pairs[i].value);
+// 		}
+// 	}
+// 	patterned = false;
+// 	return 0;
+// }
+// __forceinline__ __device__ uint64_t patternMatch(uint32_t feature) {
+// 	for(int i = 0; i < 220578; i++){ // pattern length hardcoded
+// 		if(feature == pattern_pairs[i].key){
+// 			return pattern_pairs[i].value;
+// 		}
+// 	}
+// }
 __forceinline__ __device__ uint64_t patternMatch(uint32_t feature) {
-	for(int i = 0; i < 69606; i++){ // pattern length hardcoded
-		if(feature == pattern_pairs[i].key){
-			return pattern_pairs[i].value;
-		}
-	}
+    int left = 0;
+    int right = 220578 - 1;
+
+    while (left <= right) {
+        int mid = (left + right) >> 1;
+        uint32_t mid_key = pattern_pairs[mid].key;
+
+        if (mid_key == feature) {
+            return pattern_pairs[mid].value;
+        } else if (mid_key < feature) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    return 0ULL;
 }
+
 __forceinline__ __device__ float ndc2Pix(float v, int S)
 {
 	return ((v + 1.0) * S - 1.0) * 0.5;

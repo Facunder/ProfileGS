@@ -14,6 +14,7 @@
 #include <cooperative_groups.h>
 #include <cassert>
 #include <cooperative_groups/reduce.h>
+// #include "pattern_match.h"
 namespace cg = cooperative_groups;
 
 // Forward method for converting the input spherical harmonics
@@ -259,10 +260,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	int sub_tile_y = point_image.y / (0.5 * BLOCK_Y);
 	int tile_x = min(grid.x, max((int)0, (int)(point_image.x / BLOCK_X)));
 	int tile_y = min(grid.y, max((int)0, (int)(point_image.y / BLOCK_Y)));
+	// LB-00 RB-01 LT-10 RT-11
 	if (sub_tile_x & 1 != 0) {
 		geom_feature[idx] |= 1;
 	}
-	if (sub_tile_y & 1 == 0) {
+	if (sub_tile_y & 1 != 0) {
 		geom_feature[idx] |= 2;
 	}
 	getAngleFeature(geom_feature[idx], main_direct);
@@ -275,10 +277,25 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		tmp_radii  = tmp_radii - 1;
 	}
 	geom_feature[idx] |= (tmp_radii << 2);
-	int tmp_tile_touch = patternMatchNum(geom_feature[idx], patterned[idx]);
+
+	// Opacity 
+	geom_feature[idx] |= (min(15, int(opacities[idx] / 0.0625)) << 14);	
+	
+	// int tmp_tile_touch = patternMatchNum(geom_feature[idx], patterned[idx]);
+	uint64_t cur_pattern = patternMatch(geom_feature[idx]);
+	if (cur_pattern != 0ULL) {
+		patterned[idx] = true;
+	} else {
+		patterned[idx] = false;
+	}
+	// int tmp_tile_touch = popcount_uint64_t(cur_pattern);
+	// if(tmp_tile_touch == 0){
+	// 	patterned[idx] = false;	
+	// }
 	if(!(my_radius < 65)) {
 		patterned[idx] = false;
 	}
+	
 	uint2 rect_min, rect_max;
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0){
@@ -288,8 +305,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	
 	if(patterned[idx]){
 		// int check_count = 0;
+		int tmp_tile_touch = popcount_uint64_t(cur_pattern);
 		tiles_touched[idx] = tmp_tile_touch + 1;
-		uint64_t cur_pattern = patternMatch(geom_feature[idx]);
+		// uint64_t cur_pattern = patternMatch(geom_feature[idx]);
 		int tmp_offset_x = 0;
 		int tmp_offset_y = 0;
 		for (int i = 0; i < 60; i++) {
