@@ -11,3 +11,8 @@ sim_*/
 *.txt
 *.npy
 *.png
+<<<<<<< HEAD
+=======
+tmp*/
+scripts/
+>>>>>>> e59e2ff394244e7202de7510786f9928a2b7d13b
