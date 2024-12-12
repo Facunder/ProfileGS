@@ -12,3 +12,4 @@ sim_*/
 *.npy
 *.png
 tmp*/
+scripts/
