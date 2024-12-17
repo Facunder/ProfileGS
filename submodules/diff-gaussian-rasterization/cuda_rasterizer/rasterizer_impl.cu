@@ -100,7 +100,9 @@ __global__ void duplicateWithKeys(
 			uint64_t cur_pattern = patternMatch(geom_feature[idx]);
 			int tmp_offset_x = 0;
 			int tmp_offset_y = 0;
-			for (int i = 0; i < 60; i++) {
+			for (int i = 0; i < PATTERN_BITS; i++) {
+				if (cur_pattern == 0ULL)
+					break;
 				if(patternDecoder(cur_pattern, i, tmp_offset_x, tmp_offset_y)){
 					int tmp_x = tile_x + tmp_offset_x;
 					int tmp_y = tile_y + tmp_offset_y;

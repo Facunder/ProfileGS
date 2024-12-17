@@ -248,12 +248,12 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	int axis_ratio = my_radius / sub_radius;
 	if (axis_ratio < 1) {
 		axis_ratio = 0;
-	} else if(axis_ratio >= 16) {
-		axis_ratio = 15;
+	} else if(axis_ratio >= AXIS_RATIO_COPIES) {
+		axis_ratio = AXIS_RATIO_COPIES - 1;
 	} else {
 		axis_ratio = axis_ratio - 1;
 	}
-	geom_feature[idx] |= (axis_ratio << 10);
+	geom_feature[idx] |= (axis_ratio << AXIS_RATIO_START_BIT);
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	float main_direct = (lambda1 - cov.x) / cov.y;
 	int sub_tile_x = point_image.x / (0.5 * BLOCK_X);
@@ -268,32 +268,34 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		geom_feature[idx] |= 2;
 	}
 	getAngleFeature(geom_feature[idx], main_direct);
-	int tmp_radii = my_radius / 4;
+	int tmp_radii = my_radius / RADII_UNIT;
 	if (tmp_radii < 1) {
 		tmp_radii  = 0;
-	} else if(tmp_radii >= 16) {
-		tmp_radii  = 15;
+	} else if(tmp_radii >= RADII_COPIES) {
+		tmp_radii  = RADII_COPIES - 1;
 	} else {
 		tmp_radii  = tmp_radii - 1;
 	}
 	geom_feature[idx] |= (tmp_radii << 2);
 
 	// Opacity 
-	geom_feature[idx] |= (min(15, int(opacities[idx] / 0.0625)) << 14);	
+	float opacity_unit = 1.0 / OPACITY_COPIES;
+	geom_feature[idx] |= (min(OPACITY_COPIES - 1, int(opacities[idx] / opacity_unit)) << OPACITY_START_BIT);	
 	
 	// int tmp_tile_touch = patternMatchNum(geom_feature[idx], patterned[idx]);
 	uint64_t cur_pattern = patternMatch(geom_feature[idx]);
-	if (cur_pattern != 0ULL) {
-		patterned[idx] = true;
-	} else {
-		patterned[idx] = false;
-	}
+	// if (cur_pattern != 0ULL) {
+	// 	patterned[idx] = true;
+	// } else {
+	// 	patterned[idx] = false;
+	// }
+
 	// int tmp_tile_touch = popcount_uint64_t(cur_pattern);
 	// if(tmp_tile_touch == 0){
 	// 	patterned[idx] = false;	
 	// }
-	if(!(my_radius < 65)) {
-		patterned[idx] = false;
+	if(my_radius < 65) {
+		patterned[idx] = true;
 	}
 	
 	uint2 rect_min, rect_max;
@@ -310,7 +312,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		// uint64_t cur_pattern = patternMatch(geom_feature[idx]);
 		int tmp_offset_x = 0;
 		int tmp_offset_y = 0;
-		for (int i = 0; i < 60; i++) {
+		for (int i = 0; i < PATTERN_BITS; i++) {
+			if(tiles_touched[idx] == 1)
+				break;
 			if(patternDecoder(cur_pattern, i, tmp_offset_x, tmp_offset_y)){
 				int tmp_x = tile_x + tmp_offset_x;
 				int tmp_y = tile_y + tmp_offset_y;

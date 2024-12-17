@@ -19,6 +19,17 @@
 #include "opacity_pattern_pair_array.h"
 
 #define BLOCK_SIZE (BLOCK_X * BLOCK_Y)
+// #define PATTERN_TYPES_NUM 3671 // 12 bit
+// #define PATTERN_TYPES_NUM 14193 // 14 bit
+#define PATTERN_TYPES_NUM 14315 // 14 bit
+#define RADII_COPIES 16 // 4 bit
+#define RADII_UNIT 4 // 4 bit
+#define MAIN_DIRECTION_START_BIT 6 // 4 radii + 2 subloc
+#define AXIS_RATIO_START_BIT 9 // 3 + 4 + 2
+#define AXIS_RATIO_COPIES 4 // 2 bit
+#define OPACITY_START_BIT 11
+#define OPACITY_COPIES 8
+#define PATTERN_BITS 40
 #define NUM_WARPS (BLOCK_SIZE/32)
 // Spherical harmonics coefficients
 __device__ const float SH_C0 = 0.28209479177387814f;
@@ -39,23 +50,32 @@ __device__ const float SH_C3[] = {
 	1.445305721320277f,
 	-0.5900435899266435f
 };
-__device__ const float angle_criteria[] = {
-	-5.0273f,
-    -2.4142f,
-    -1.4966f,   
-	-1.0000f,   
-	-0.6682f,   
-	-0.4142f,   
-	-0.1989f,         
-	0.0f,    
-	0.1989f,
+__device__ const float angle_criteria[] = { // 3 bit 
+	-2.4142f,
+	-1.0000f,
+	-0.4143f,
+	0.0f,
 	0.4142f,
-    0.6682f,
-    1.0000f,
-    1.4966f,
-	2.4142f,
-    5.0273f
+	1.0000f,
+	2.4142f
 };
+// __device__ const float angle_criteria[] = { // 4 bit
+// 	-5.0273f,
+//     -2.4142f,
+//     -1.4966f,   
+// 	-1.0000f,   
+// 	-0.6682f,   
+// 	-0.4142f,   
+// 	-0.1989f,         
+// 	0.0f,    
+// 	0.1989f,
+// 	0.4142f,
+//     0.6682f,
+//     1.0000f,
+//     1.4966f,
+// 	2.4142f,
+//     5.0273f
+// };
 struct offsetsAdjacencyPair{
 	int offset_x;
 	int offset_y;
@@ -122,18 +142,18 @@ __device__ const offsetsAdjacencyPair offsetsAdjacencyPairs[] = {
 	{-1, -4, 0x0100000000000000},
 	{-2, -3, 0x0200000000000000},
 	{-3, -2, 0x0400000000000000},
-	{-4, -1, 0x0800000000000000}, // level-5 over 20
+	{-4, -1, 0x0800000000000000} // level-5 over 20
 };
 
 __forceinline__ __device__ void getAngleFeature(uint32_t& feature, float tan_main_direction)
 {
-	for(int i = 0; i < 15; i++) {
+	for(int i = 0; i < 7; i++) {
 		if(tan_main_direction < angle_criteria[i]) {
-			feature |= (i << 6); // radii 4bits and sub_location 2bits
+			feature |= (i << MAIN_DIRECTION_START_BIT);
 			return;
 		}
 	}
-	feature |= (15 << 6);
+	feature |= (7 << MAIN_DIRECTION_START_BIT);
 }
 __forceinline__ __device__ int popcount_uint64_t(uint64_t n) {
     unsigned int low = __popc(static_cast<unsigned int>(n)); 
@@ -169,7 +189,7 @@ __forceinline__ __device__ bool patternDecoder(uint64_t pattern, int indix, int&
 // }
 __forceinline__ __device__ uint64_t patternMatch(uint32_t feature) {
     int left = 0;
-    int right = 220578 - 1;
+    int right = PATTERN_TYPES_NUM - 1;
 
     while (left <= right) {
         int mid = (left + right) >> 1;
