@@ -14,6 +14,8 @@
 
 #include "config.h"
 #include "stdio.h"
+#include <thrust/device_vector.h>
+#include <thrust/sort.h>
 
 #define BLOCK_SIZE (BLOCK_X * BLOCK_Y)
 #define NUM_WARPS (BLOCK_SIZE/32)
@@ -71,6 +73,17 @@ __forceinline__ __device__ float2 vecPerpendicular(const float2 &v)
 {
     return make_float2(-v.y, v.x);
 }
+
+__forceinline__ __device__ float get_axis_ratio(float2 *obb_corners) {
+	float dist1 = hypotf(obb_corners[1].x - obb_corners[0].x, obb_corners[1].y - obb_corners[0].y);
+	float dist2 = hypotf(obb_corners[2].x - obb_corners[1].x, obb_corners[2].y - obb_corners[1].y);
+
+	float length = fmaxf(dist1, dist2);
+	float width = fminf(dist1, dist2);
+
+	return length / width;
+}
+
 __forceinline__ __device__ bool SAT(float2 *rect1, float2 *rect2)
 {
 	float2 axes[4];

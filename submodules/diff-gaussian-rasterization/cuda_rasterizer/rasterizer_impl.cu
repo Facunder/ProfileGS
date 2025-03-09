@@ -102,24 +102,33 @@ __global__ void duplicateWithKeys(
 			{obb_corners[idx * 4 + 2].x, obb_corners[idx * 4 + 2].y},
 			{obb_corners[idx * 4 + 3].x, obb_corners[idx * 4 + 3].y}
 		};
-
+		float axis_ratio = get_axis_ratio(global_corners);
 		for (int y = rect_min.y; y < rect_max.y; y++)
 		{
 			for (int x = rect_min.x; x < rect_max.x; x++)
-			{
-				float2 tile_corners[4] = {
-					{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y + BLOCK_Y - 1},
-					{x * BLOCK_X, y * BLOCK_Y + BLOCK_Y - 1},
-					{x * BLOCK_X, y * BLOCK_Y},
-					{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y}				
-				};
-				if(SAT(tile_corners, global_corners)){
+			{			
+				if(axis_ratio <= 2) {
 					uint64_t key = y * grid.x + x;
 					key <<= 32;
 					key |= *((uint32_t*)&depths[idx]);
 					gaussian_keys_unsorted[off] = key;
 					gaussian_values_unsorted[off] = idx;
 					off++;
+				} else {
+					float2 tile_corners[4] = {
+						{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y + BLOCK_Y - 1},
+						{x * BLOCK_X, y * BLOCK_Y + BLOCK_Y - 1},
+						{x * BLOCK_X, y * BLOCK_Y},
+						{x * BLOCK_X + BLOCK_X - 1, y * BLOCK_Y}				
+					};
+					if(SAT(tile_corners, global_corners)){
+						uint64_t key = y * grid.x + x;
+						key <<= 32;
+						key |= *((uint32_t*)&depths[idx]);
+						gaussian_keys_unsorted[off] = key;
+						gaussian_values_unsorted[off] = idx;
+						off++;
+					}
 				}
 			}
 		}
