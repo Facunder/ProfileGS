@@ -219,6 +219,7 @@ int CudaRasterizer::Rasterizer::forward(
 	float* depth,
 	bool antialiasing,
 	int* radii,
+	int* fragment_counts,
 	bool debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -303,6 +304,7 @@ int CudaRasterizer::Rasterizer::forward(
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
 
 	// Sort complete list of (duplicated) Gaussian indices by keys
+	*fragment_counts = binningState.sorting_size;
 	CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
 		binningState.list_sorting_space,
 		binningState.sorting_size,

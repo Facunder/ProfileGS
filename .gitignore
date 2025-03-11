@@ -13,3 +13,5 @@ sim_*/
 *.png
 tmp*/
 scripts/
+*.csv
+*.jpg
