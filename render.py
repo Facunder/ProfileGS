@@ -26,16 +26,23 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
-
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background, train_test_exp, separate_sh):
+    torch.cuda.set_per_process_memory_fraction(0.4)
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
-
+    view_count = 0
+    accum_fragments = 0
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        rendering = render(view, gaussians, pipeline, background, use_trained_exp=train_test_exp, separate_sh=separate_sh)["render"]
+        temp_render_res= render(view, gaussians, pipeline, background, use_trained_exp=train_test_exp, separate_sh=separate_sh)
+        rendering = temp_render_res["render"]
+        res_buffer = temp_render_res["buffer"]
+        fragments = res_buffer["fragment_counts"]
+        # print("idx-{}, view: {}\n".format(idx, view))
+        print("idx-{}, framents num: {}\n".format(idx, fragments))
         gt = view.original_image[0:3, :, :]
 
         if args.train_test_exp:
@@ -44,6 +51,12 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        
+        view_count += 1
+        accum_fragments = accum_fragments + fragments
+        
+    print("\ntotal {} views, acc_frag: {}, avg_frag: {}\n".format(view_count, accum_fragments, accum_fragments/view_count))
+    
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, separate_sh: bool):
     with torch.no_grad():
@@ -52,7 +65,7 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-
+        print("skip_train {}, skip_test {}".format(skip_train, skip_test))
         if not skip_train:
              render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, dataset.train_test_exp, separate_sh)
 

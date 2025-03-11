@@ -81,14 +81,14 @@ class _RasterizeGaussians(torch.autograd.Function):
         )
 
         # Invoke C++/CUDA rasterizer
-        num_rendered, color, radii, geomBuffer, binningBuffer, imgBuffer, invdepths = _C.rasterize_gaussians(*args)
+        fragment_counts, num_rendered, color, radii, geomBuffer, binningBuffer, imgBuffer, invdepths = _C.rasterize_gaussians(*args)
 
         # Keep relevant tensors for backward
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(colors_precomp, means3D, scales, rotations, cov3Ds_precomp, radii, sh, opacities, geomBuffer, binningBuffer, imgBuffer)
         # WLZ modify for buffer info log
-        buffer = {"num_rendered":num_rendered, "radii":radii, "geomBuffer":geomBuffer, "binningBuffer":binningBuffer, "imgBuffer":imgBuffer}
+        buffer = {"fragment_counts":fragment_counts, "num_rendered":num_rendered, "radii":radii, "geomBuffer":geomBuffer, "binningBuffer":binningBuffer, "imgBuffer":imgBuffer}
         #return color, radii, invdepths
         return color, buffer, invdepths  
 

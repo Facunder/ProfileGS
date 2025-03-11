@@ -243,6 +243,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float mid = 0.5f * (cov.x + cov.z);
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+	// float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+	// test to change AABB confidence interval
 	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
 	float sub_radius = ceil(3.f * sqrt(min(lambda1, lambda2)));
 	int axis_ratio = my_radius / sub_radius;
