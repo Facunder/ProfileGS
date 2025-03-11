@@ -10,4 +10,10 @@ sim_pts/
 sim_pts_*/
 scripts/
 *.log
+*.txt
+*.npy
+*.png
+tmp*/
+scripts/
 *.csv
+*.jpg
