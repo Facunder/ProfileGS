@@ -314,6 +314,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		// uint64_t cur_pattern = patternMatch(geom_feature[idx]);
 		int tmp_offset_x = 0;
 		int tmp_offset_y = 0;
+		// int pre_skip_flag = 0;
+		// int effect_count = 0;
 		for (int i = 0; i < PATTERN_BITS; i++) {
 			if(tiles_touched[idx] == 1)
 				break;
@@ -321,9 +323,14 @@ __global__ void preprocessCUDA(int P, int D, int M,
 				int tmp_x = tile_x + tmp_offset_x;
 				int tmp_y = tile_y + tmp_offset_y;
 				// check_count++;
-				if(tmp_x < 0 || tmp_x > grid.x || tmp_y < 0 || tmp_y > grid.y) {
+				if(tmp_x < 0 || tmp_x >= grid.x || tmp_y < 0 || tmp_y >= grid.y) { // change > to >=
+				// if(pre_skip_flag || tmp_x < 0 || tmp_x >= grid.x || tmp_y < 0 || tmp_y >= grid.y) { // change > to >=
 					tiles_touched[idx] = tiles_touched[idx] - 1;
 				}
+				// // hierachy lut method
+				// effect_count++;
+				// if((i == 23) && (effect_count < 4))
+				// 	pre_skip_flag = 1;
 			}
 		}
 		// printf("check_count: %d\n, tmp_tile_touch %d\n", check_count, tmp_tile_touch);
