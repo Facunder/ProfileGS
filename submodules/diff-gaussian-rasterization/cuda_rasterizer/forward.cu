@@ -11,6 +11,7 @@
 
 #include "forward.h"
 #include "auxiliary.h"
+#include "approx.h"
 #include <cooperative_groups.h>
 #include <cassert>
 #include <cooperative_groups/reduce.h>
@@ -388,7 +389,8 @@ renderCUDA(
 	uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
 	uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
 	uint32_t pix_id = W * pix.y + pix.x;
-	float2 pixf = { (float)pix.x, (float)pix.y };
+	// float2 pixf = { (float)pix.x, (float)pix.y };
+	half2 pixf = { (__half)pix.x, (__half)pix.y };
 
 	// Check if this thread is associated with a valid pixel or outside.
 	bool inside = pix.x < W&& pix.y < H;
@@ -402,14 +404,17 @@ renderCUDA(
 
 	// Allocate storage for batches of collectively fetched data.
 	__shared__ int collected_id[BLOCK_SIZE];
-	__shared__ float2 collected_xy[BLOCK_SIZE];
-	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	// __shared__ float2 collected_xy[BLOCK_SIZE];
+	// __shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ half2 collected_xy[BLOCK_SIZE];
+	__shared__ half4 collected_conic_opacity[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
-	float C[CHANNELS] = { 0 };
+	// float C[CHANNELS] = { 0 };
+	__half C[CHANNELS] = { 0 };
 
 	float expected_invdepth = 0.0f;
 
@@ -440,21 +445,28 @@ renderCUDA(
 
 			// Resample using conic matrix (cf. "Surface 
 			// Splatting" by Zwicker et al., 2001)
-			float2 xy = collected_xy[j];
-			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
-			float4 con_o = collected_conic_opacity[j];
-			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
-			if (power > 0.0f)
+			// float2 xy = collected_xy[j];
+			// float2 d = { xy.x - pixf.x, xy.y - pixf.y };
+			// float4 con_o = collected_conic_opacity[j];
+			// float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
+			// if (power > 0.0f)
+			// 	continue;
+			//// quant:
+			half2 xy = collected_xy[j];
+			half2 d = { xy.x - pixf.x, xy.y - pixf.y };
+			half4 con_o = collected_conic_opacity[j];
+			const __half power = __half(-0.5f) * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) + con_o.y * d.x * d.y;
+			if (power > __half(0.0f))
 				continue;
 
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
-			float alpha = min(0.99f, con_o.w * exp(power));
-			if (alpha < 1.0f / 255.0f)
+			__half alpha = __hmin(__half(0.99f), con_o.w * __half(exp(float(power))));
+			if (alpha < __half(1.0f / 255.0f))
 				continue;
-			float test_T = T * (1 - alpha);
+			float test_T = T * float(__half(1.0) - alpha);
 			if (test_T < 0.0001f)
 			{
 				done = true;
@@ -463,10 +475,10 @@ renderCUDA(
 
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+				C[ch] += __half(features[collected_id[j] * CHANNELS + ch]) * alpha * __half(T);
 
 			if(invdepth)
-			expected_invdepth += (1 / depths[collected_id[j]]) * alpha * T;
+			expected_invdepth += float((__half(1.0) / __half(depths[collected_id[j]])) * alpha * __half(T));
 
 			T = test_T;
 
@@ -483,7 +495,7 @@ renderCUDA(
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
-			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+			out_color[ch * H * W + pix_id] = float(C[ch]) + T * bg_color[ch];
 
 		if (invdepth)
 		invdepth[pix_id] = expected_invdepth;// 1. / (expected_depth + T * 1e3);
